@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException, Query
 import yt_dlp
 import requests
 import re
+import urllib.parse
 
 app = FastAPI()
 
@@ -12,43 +13,50 @@ def clean_url(raw_text: str) -> str:
 @app.get("/api/parse")
 def parse_video(url: str = Query(..., description="目标视频链接或文案")):
     target_url = clean_url(url)
-    
-    # ================= 1. 抖音专属解析逻辑 =================
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Referer': target_url
+    }
+
+    # ================= 1. 针对常规影视网站 (如各类在线影院) 进行网页嗅探 =================
+    try:
+        res = requests.get(target_url, headers=headers, timeout=8)
+        html = res.text
+
+        # 尝试从网页源码/播放器配置变量中提取 m3u8/mp4 地址
+        m3u8_matches = re.findall(r'https?://[a-zA-Z0-9._\-/]+\.m3u8[a-zA-Z0-9._\-/?=&%]*', html)
+        if m3u8_matches:
+            real_m3u8 = urllib.parse.unquote(m3u8_matches[0])
+            title_match = re.search(r'<title>(.*?)</title>', html)
+            title = title_match.group(1).split('-')[0].strip() if title_match else "在线影视视频"
+            return {
+                "code": 200,
+                "title": title,
+                "audio_url": real_m3u8,
+                "play_url": real_m3u8
+            }
+    except Exception:
+        pass
+
+    # ================= 2. 抖音 / TikTok 专属解析 =================
     if "douyin.com" in target_url or "iesdouyin.com" in target_url:
         try:
-            # 请求重定向获取最终 URL
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15'
-            }
-            res = requests.get(target_url, headers=headers, allow_redirects=True, timeout=10)
-            final_url = res.url
-            html = res.text
-
-            # 抓取纯数字 video id
-            vid_match = re.search(r'video/(\d+)', final_url)
-            if not vid_match:
-                vid_match = re.search(r'/share/video/(\d+)', html)
-
+            m_headers = {'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X)'}
+            r = requests.get(target_url, headers=m_headers, allow_redirects=True, timeout=10)
+            vid_match = re.search(r'video/(\d+)', r.url) or re.search(r'/share/video/(\d+)', r.text)
             if vid_match:
                 video_id = vid_match.group(1)
-                # 字节直出无水印直链
                 direct_mp4 = f"https://aweme.snssdk.com/aweme/v1/play/?video_id={video_id}&ratio=1080p&line=0"
-                
-                title = "抖音精选视频"
-                title_match = re.search(r'<title>(.*?)</title>', html)
-                if title_match:
-                    title = title_match.group(1).replace("- 抖音", "").strip()
-
                 return {
                     "code": 200,
-                    "title": title,
+                    "title": "抖音视频",
                     "audio_url": direct_mp4,
                     "play_url": direct_mp4
                 }
-        except Exception as e:
+        except Exception:
             pass
 
-    # ================= 2. YouTube 与其他通用平台 (移动客户端破盾) =================
+    # ================= 3. 通用与 YouTube 提取 =================
     ydl_opts = {
         'format': 'bestaudio/best',
         'quiet': True,
@@ -56,32 +64,26 @@ def parse_video(url: str = Query(..., description="目标视频链接或文案")
         'extract_flat': False,
         'extractor_args': {
             'youtube': {
-                'player_client': ['mweb', 'android_creator', 'ios'],
-                'player_skip': ['webpage', 'configs']
+                'player_client': ['android', 'web']
             }
-        },
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (iPad; CPU OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
-            'Accept-Language': 'en-US,en;q=0.9,zh-CN;q=0.8'
         }
     }
-    
+
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(target_url, download=False)
-            
             title = info.get('title', '已提取影视视频')
             audio_url = info.get('url')
-            
-            formats = info.get('formats', [])
             play_url = audio_url
+
+            formats = info.get('formats', [])
             for f in formats:
                 if f.get('vcodec') != 'none' and f.get('acodec') != 'none':
                     play_url = f.get('url')
                     break
 
             if not audio_url:
-                raise Exception("未能提取到有效音频流")
+                raise Exception("未能提取到有效流媒体直链")
 
             return {
                 "code": 200,
