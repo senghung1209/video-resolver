@@ -12,12 +12,11 @@ import streamlit.components.v1 as components
 
 st.set_page_config(page_title="AI 旅游团智能筛选助手", page_icon="✈️", layout="wide")
 
-st.title("✈️ 旅游团宣传单智能分析与筛选 (Vertex AI 极速版)")
-st.markdown("已接入 Google Cloud Vertex AI 专属通道：秒级高并发、支持 2026 学校假期精准核验与后台提醒。")
+st.title("✈️ 旅游团宣传单智能分析与筛选 (Gemini 官方极速版)")
+st.markdown("已按官方 cURL 接入 Google 原生专线：秒级并发解析、告别排队限流、精准识别各省板块与 2026 学校假期。")
 
-# 你的 Vertex AI 专属项目与密钥
-PROJECT_ID = "128412725460"
-DEFAULT_GEMINI_KEY = "AQ.Ab8RN6LbXfnPZoT1BUFEDZ2MWyE8Tr9V0Q-k8Xovtr2h7ou7oA"
+# 你的官方专属 AQ. 密钥
+DEFAULT_GEMINI_KEY = "AQ.Ab8RN6JktT71UH7ZHw6ieP1-Q9EouOO58rnMEBOA7n-hmbHXDA"
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", DEFAULT_GEMINI_KEY)
 
 OFFICIAL_HOLIDAYS = [
@@ -152,7 +151,7 @@ def trigger_notification():
     """
     components.html(js, height=0)
 
-def compress_image(uploaded_file, max_size=1000, quality=75):
+def compress_image(uploaded_file, max_size=1100, quality=78):
     img = Image.open(uploaded_file)
     if img.mode in ("RGBA", "P"):
         img = img.convert("RGB")
@@ -203,29 +202,26 @@ def analyze_single_image(file_bytes, file_name, api_key):
         "3. 只输出有效数据行，不要输出 Markdown 表头或多余文字。"
     )
 
-    # Vertex AI 专线终端点：原生支持 AQ. 密钥
-    url = f"https://aiplatform.googleapis.com/v1/projects/{PROJECT_ID}/locations/us-central1/publishers/google/models/gemini-2.5-flash:generateContent"
+    # 严格按照官方 cURL 端点与 Header 规范
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent"
     headers = {
         "Content-Type": "application/json",
-        "x-goog-api-key": api_key
+        "X-goog-api-key": api_key.strip()
     }
     payload = {
-        "contents": [{
-            "role": "user",
-            "parts": [
-                {"text": prompt},
-                {
-                    "inline_data": {
-                        "mime_type": "image/jpeg",
-                        "data": encoded_string
+        "contents": [
+            {
+                "parts": [
+                    {"text": prompt},
+                    {
+                        "inline_data": {
+                            "mime_type": "image/jpeg",
+                            "data": encoded_string
+                        }
                     }
-                }
-            ]
-        }],
-        "generationConfig": {
-            "temperature": 0.1,
-            "maxOutputTokens": 4096
-        }
+                ]
+            }
+        ]
     }
     
     response = requests.post(url, headers=headers, json=payload, timeout=60)
@@ -254,12 +250,12 @@ def analyze_single_image(file_bytes, file_name, api_key):
             err_msg = response.json().get("error", {}).get("message", response.text)
         except Exception:
             pass
-        raise Exception(f"Vertex AI 报错 ({response.status_code}): {err_msg}")
+        raise Exception(f"Google 认证报错 ({response.status_code}): {err_msg}")
 
 def background_worker(files_data, task_dict, api_key):
     total = len(files_data)
     for idx, (f_name, f_bytes) in enumerate(files_data):
-        task_dict["status_msg"] = f"⚡ Vertex AI 正在极速全板块解析第 {idx + 1}/{total} 张: {f_name} ..."
+        task_dict["status_msg"] = f"⚡ Gemini 正在秒速全板块解析第 {idx + 1}/{total} 张: {f_name} ..."
         try:
             data = analyze_single_image(f_bytes, f_name, api_key)
             if data:
@@ -319,7 +315,7 @@ if uploaded_files:
             task["progress"] = 0.0
             task["results"] = []
             task["errors"] = []
-            task["status_msg"] = "正在通过 Vertex AI 专线启动引擎..."
+            task["status_msg"] = "正在启动 Google 极速引擎..."
             
             files_data = [(f.name, f.getvalue()) for f in uploaded_files]
             t = threading.Thread(target=background_worker, args=(files_data, task, GEMINI_API_KEY), daemon=True)
