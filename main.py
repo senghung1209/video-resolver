@@ -12,10 +12,11 @@ import streamlit.components.v1 as components
 
 st.set_page_config(page_title="AI 旅游团智能筛选助手", page_icon="✈️", layout="wide")
 
-st.title("✈️ 旅游团宣传单智能分析与筛选 (Gemini 2.5 Flash 极速版)")
-st.markdown("已完美原生适配 Google AQ. 官方密钥：极速并发、零排队、精准区分出发地与 2026 学校假期。")
+st.title("✈️ 旅游团宣传单智能分析与筛选 (Vertex AI 极速版)")
+st.markdown("已接入 Google Cloud Vertex AI 专属通道：秒级高并发、支持 2026 学校假期精准核验与后台提醒。")
 
-# 你的官方专属 AQ. 密钥
+# 你的 Vertex AI 专属项目与密钥
+PROJECT_ID = "128412725460"
 DEFAULT_GEMINI_KEY = "AQ.Ab8RN6LbXfnPZoT1BUFEDZ2MWyE8Tr9V0Q-k8Xovtr2h7ou7oA"
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", DEFAULT_GEMINI_KEY)
 
@@ -151,7 +152,7 @@ def trigger_notification():
     """
     components.html(js, height=0)
 
-def compress_image(uploaded_file, max_size=1100, quality=78):
+def compress_image(uploaded_file, max_size=1000, quality=75):
     img = Image.open(uploaded_file)
     if img.mode in ("RGBA", "P"):
         img = img.convert("RGB")
@@ -202,14 +203,15 @@ def analyze_single_image(file_bytes, file_name, api_key):
         "3. 只输出有效数据行，不要输出 Markdown 表头或多余文字。"
     )
 
-    # 官方指定：针对 AQ. 密钥，URL 不带参数，只通过原生 Header 认证
-    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+    # Vertex AI 专线终端点：原生支持 AQ. 密钥
+    url = f"https://aiplatform.googleapis.com/v1/projects/{PROJECT_ID}/locations/us-central1/publishers/google/models/gemini-2.5-flash:generateContent"
     headers = {
         "Content-Type": "application/json",
         "x-goog-api-key": api_key
     }
     payload = {
         "contents": [{
+            "role": "user",
             "parts": [
                 {"text": prompt},
                 {
@@ -252,12 +254,12 @@ def analyze_single_image(file_bytes, file_name, api_key):
             err_msg = response.json().get("error", {}).get("message", response.text)
         except Exception:
             pass
-        raise Exception(f"Google 认证报错 ({response.status_code}): {err_msg}")
+        raise Exception(f"Vertex AI 报错 ({response.status_code}): {err_msg}")
 
 def background_worker(files_data, task_dict, api_key):
     total = len(files_data)
     for idx, (f_name, f_bytes) in enumerate(files_data):
-        task_dict["status_msg"] = f"⚡ Gemini 正在秒速全板块解析第 {idx + 1}/{total} 张: {f_name} ..."
+        task_dict["status_msg"] = f"⚡ Vertex AI 正在极速全板块解析第 {idx + 1}/{total} 张: {f_name} ..."
         try:
             data = analyze_single_image(f_bytes, f_name, api_key)
             if data:
@@ -317,7 +319,7 @@ if uploaded_files:
             task["progress"] = 0.0
             task["results"] = []
             task["errors"] = []
-            task["status_msg"] = "正在启动 Google 极速引擎..."
+            task["status_msg"] = "正在通过 Vertex AI 专线启动引擎..."
             
             files_data = [(f.name, f.getvalue()) for f in uploaded_files]
             t = threading.Thread(target=background_worker, args=(files_data, task, GEMINI_API_KEY), daemon=True)
